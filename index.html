@@ -13,7 +13,7 @@
       --bg:#f5f2ec; --card:#fff; --ink:#222; --muted:#777; --green:#2d5a3d; --green2:#4a7c5f; --line:#ddd;
     }
     *{box-sizing:border-box}
-    body{margin:0;font-family:Arial, sans-serif;background:var(--bg);color:var(--ink)}
+    body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--ink)}
     header{padding:14px 18px;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
     header h1{font-size:18px;margin:0}
     header .hint{font-size:12px;opacity:.8}
@@ -47,16 +47,16 @@
 <body>
 <header>
   <h1>🌿 Crédito Rural por Município · BCB/SICOR</h1>
-  <div class="hint">Carrega 2015–2025 via /api/bcb, agrega por município e desenha uma UF por vez</div>
+  <div class="hint">Sem $filter: baixa paginado, filtra 2015–2025 no navegador e desenha uma UF por vez</div>
 </header>
 
 <div class="layout">
   <aside>
     <div class="box">
-      <label>Período</label>
+      <label>Período a manter após download</label>
       <select id="periodo">
-        <option value="2015-2025" selected>2015–2025</option>
-        <option value="2023-2025">2023–2025 teste rápido</option>
+        <option value="2015-2025" selected>2015–2025 completo</option>
+        <option value="2023-2025">2023–2025 teste</option>
         <option value="2025-2025">2025 somente</option>
       </select>
 
@@ -73,7 +73,14 @@
         <option value="vlIndustrializacao">Valor industrialização</option>
       </select>
 
-      <button id="btnLoad" onclick="carregarDados()">1. Carregar dados BCB</button>
+      <label>Tamanho da página BCB</label>
+      <select id="pageSize">
+        <option value="50">50</option>
+        <option value="100" selected>100</option>
+        <option value="250">250</option>
+      </select>
+
+      <button id="btnLoad" onclick="carregarDados()">1. Carregar e agregar dados</button>
       <button id="btnMap" onclick="desenharUF()">2. Desenhar UF selecionada</button>
       <button class="secondary" onclick="baixarCSV()">Baixar agregado CSV</button>
       <button class="danger" onclick="parar()">Parar carregamento</button>
@@ -88,8 +95,10 @@
     <div class="box stat">
       <div><b id="sMun">0</b><span>municípios agregados</span></div>
       <div><b id="sReg">0</b><span>linhas BCB lidas</span></div>
+      <div><b id="sMantidas">0</b><span>linhas no período</span></div>
       <div><b id="sVal">R$ 0</b><span>valor total</span></div>
       <div><b id="sQtd">0</b><span>contratos</span></div>
+      <div><b id="sPag">0</b><span>páginas lidas</span></div>
     </div>
 
     <div class="box">
@@ -111,11 +120,12 @@
 
 <script>
 const ENDPOINT = "CusteioInvestimentoComercialIndustrialSemFiltros";
-const PAGE_SIZE = 250; // tamanho conservador para evitar 500/timeouts
-const MAX_EMPTY_OR_ERROR_RETRIES = 3;
+const MAX_RETRIES = 3;
 let stopFlag = false;
 let aggregate = new Map();
 let totalRows = 0;
+let keptRows = 0;
+let totalPages = 0;
 let map, layer;
 
 const UFS = [
@@ -135,11 +145,14 @@ function init(){
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution:'© OpenStreetMap' }).addTo(map);
 }
 
-function yearsFromSelect(){
+function periodRange(){
   const [a,b] = document.getElementById('periodo').value.split('-').map(Number);
-  const years = [];
-  for(let y=a;y<=b;y++) years.push(String(y));
-  return years;
+  return {start:a, end:b};
+}
+function inPeriod(row){
+  const {start,end} = periodRange();
+  const y = Number(row.AnoEmissao);
+  return y >= start && y <= end;
 }
 function log(msg){
   const el = document.getElementById('log');
@@ -147,89 +160,97 @@ function log(msg){
   el.scrollTop = el.scrollHeight;
 }
 function status(msg){ document.getElementById('status').textContent = msg; }
-function setProgress(done,total){ document.getElementById('bar').style.width = Math.min(100, done/total*100) + '%'; }
+function setProgressUnknown(){ document.getElementById('bar').style.width = ((totalPages % 20) / 20 * 100) + '%'; }
 function n(v){ return Number(v || 0); }
 function fmtBR(v){ return n(v).toLocaleString('pt-BR'); }
 function fmtMoney(v){ return n(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0}); }
 function municipioKey(row){ return String(row.codMunicIbge || '').padStart(7,'0'); }
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 function buildUrl(params){
   const qs = new URLSearchParams({ endpoint: ENDPOINT, "$format":"json", ...params });
   return "/api/bcb?" + qs.toString();
 }
 
-async function fetchPage(params, attempt=1){
+async function fetchPage(skip, top, useSelect=true, attempt=1){
+  const select = "codMunicIbge,Municipio,nomeUF,cdEstado,AnoEmissao,MesEmissao,QtdCusteio,VlCusteio,QtdInvestimento,VlInvestimento,QtdComercializacao,VlComercializacao,QtdIndustrializacao,VlIndustrializacao";
+  const params = { "$top": String(top), "$skip": String(skip) };
+  if(useSelect) params["$select"] = select;
+
   const url = buildUrl(params);
   const controller = new AbortController();
-  const timeout = setTimeout(()=>controller.abort(), 20000);
+  const timeout = setTimeout(()=>controller.abort(), 25000);
+
   try{
     const res = await fetch(url, {signal: controller.signal});
     clearTimeout(timeout);
     const text = await res.text();
     if(!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0,300)}`);
-    return JSON.parse(text).value || [];
+    const json = JSON.parse(text);
+    return json.value || [];
   }catch(e){
     clearTimeout(timeout);
-    if(attempt < MAX_EMPTY_OR_ERROR_RETRIES){
-      log(`Falhou, tentando novamente (${attempt+1}/${MAX_EMPTY_OR_ERROR_RETRIES})... ${String(e).slice(0,120)}`);
-      await sleep(1200 * attempt);
-      return fetchPage(params, attempt+1);
+    if(attempt < MAX_RETRIES){
+      log(`Falhou, tentando novamente (${attempt+1}/${MAX_RETRIES})... ${String(e).slice(0,140)}`);
+      await sleep(1500 * attempt);
+      return fetchPage(skip, top, useSelect, attempt+1);
+    }
+    if(useSelect){
+      log(`Falhou com $select. Tentando mesma página sem $select...`);
+      return fetchPage(skip, top, false, 1);
     }
     throw e;
   }
 }
-function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 async function carregarDados(){
   stopFlag = false;
   aggregate = new Map();
   totalRows = 0;
+  keptRows = 0;
+  totalPages = 0;
   document.getElementById('log').textContent = '';
   document.getElementById('topTable').textContent = 'Dados carregando...';
   updateStats();
 
-  const years = yearsFromSelect();
-  const select = "codMunicIbge,Municipio,nomeUF,cdEstado,AnoEmissao,MesEmissao,QtdCusteio,VlCusteio,QtdInvestimento,VlInvestimento,QtdComercializacao,VlComercializacao,QtdIndustrializacao,VlIndustrializacao";
-  const totalYearSteps = years.length;
-  let doneYears = 0;
+  const {start,end} = periodRange();
+  const pageSize = Number(document.getElementById('pageSize').value || 100);
+  let skip = 0;
 
   document.getElementById('btnLoad').disabled = true;
-  status(`Carregando ${years[0]}–${years[years.length-1]}...`);
+  status(`Carregando endpoint bruto, mantendo ${start}–${end}. Isso pode demorar bastante...`);
+  log(`Endpoint: ${ENDPOINT}`);
+  log(`Sem $filter. Filtragem ${start}–${end} feita no navegador.`);
+  log(`Página: ${pageSize} registros`);
 
   try{
-    for(const year of years){
+    while(true){
       if(stopFlag) break;
-      let skip = 0;
-      let page = 1;
-      log(`Ano ${year}`);
 
-      while(true){
-        if(stopFlag) break;
-        status(`Ano ${year} · página ${page} · registros lidos ${fmtBR(totalRows)}`);
-        const rows = await fetchPage({
-          "$top": String(PAGE_SIZE),
-          "$skip": String(skip),
-          "$select": select,
-          "$filter": `AnoEmissao eq ${year}`
-        });
+      totalPages++;
+      status(`Página ${totalPages} · skip ${skip} · lidas ${fmtBR(totalRows)} · mantidas ${fmtBR(keptRows)}`);
+      setProgressUnknown();
 
-        totalRows += rows.length;
-        for(const r of rows) addRow(r);
-        if(page % 5 === 0) updateStats();
-        log(`  página ${page}: ${rows.length} linhas · total ${fmtBR(totalRows)}`);
+      const rows = await fetchPage(skip, pageSize, true);
+      totalRows += rows.length;
 
-        if(rows.length < PAGE_SIZE) break;
-        skip += PAGE_SIZE;
-        page++;
-        await sleep(150);
+      const filtered = rows.filter(inPeriod);
+      keptRows += filtered.length;
+      for(const r of filtered) addRow(r);
+
+      log(`página ${totalPages}: ${rows.length} linhas · mantidas ${filtered.length} · total mantidas ${fmtBR(keptRows)}`);
+      if(totalPages % 5 === 0) updateStats();
+
+      if(rows.length < pageSize){
+        log('Fim: última página menor que pageSize.');
+        break;
       }
 
-      doneYears++;
-      setProgress(doneYears,totalYearSteps);
-      updateStats();
+      skip += pageSize;
+      await sleep(120);
     }
 
-    status(stopFlag ? `Parado. ${fmtBR(totalRows)} linhas lidas.` : `Finalizado. ${fmtBR(totalRows)} linhas lidas.`);
+    status(stopFlag ? `Parado. ${fmtBR(totalRows)} linhas lidas, ${fmtBR(keptRows)} no período.` : `Finalizado. ${fmtBR(totalRows)} linhas lidas, ${fmtBR(keptRows)} no período.`);
     log('Carga finalizada. Agora selecione uma UF e clique em desenhar.');
   }catch(e){
     status('Erro durante carga. Dados parciais preservados.');
@@ -273,8 +294,10 @@ function updateStats(){
   for(const r of aggregate.values()){ val += r.valorTotal; qtd += r.qtdTotal; }
   document.getElementById('sMun').textContent = fmtBR(aggregate.size);
   document.getElementById('sReg').textContent = fmtBR(totalRows);
+  document.getElementById('sMantidas').textContent = fmtBR(keptRows);
   document.getElementById('sVal').textContent = fmtMoney(val);
   document.getElementById('sQtd').textContent = fmtBR(qtd);
+  document.getElementById('sPag').textContent = fmtBR(totalPages);
 }
 
 function parar(){ stopFlag = true; status('Parando ao fim da página atual...'); }
@@ -355,7 +378,7 @@ function renderLegend(b, metric){
 function renderTop(rows, metric){
   const money = metric.startsWith('vl') || metric === 'valorTotal';
   const f = v => money ? fmtMoney(v) : fmtBR(v);
-  const top = rows.sort((a,b)=>b[metric]-a[metric]).slice(0,12);
+  const top = [...rows].sort((a,b)=>b[metric]-a[metric]).slice(0,12);
   if(!top.length){ document.getElementById('topTable').textContent = 'Sem dados para esta UF.'; return; }
   document.getElementById('topTable').innerHTML = `<table><thead><tr><th>Município</th><th>${labelMetric(metric)}</th></tr></thead><tbody>`+
     top.map(r => `<tr><td>${esc(r.municipio)}</td><td>${f(r[metric])}</td></tr>`).join('') + `</tbody></table>`;
@@ -364,6 +387,7 @@ function esc(v){ return String(v ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','
 
 function baixarCSV(){
   if(!aggregate.size){ alert('Carregue os dados primeiro.'); return; }
+  const {start,end} = periodRange();
   const cols = ['codMunicIbge','municipio','uf','qtdTotal','valorTotal','qtdCusteio','vlCusteio','qtdInvestimento','vlInvestimento','qtdComercializacao','vlComercializacao','qtdIndustrializacao','vlIndustrializacao'];
   const lines = [cols.join(';')];
   for(const r of aggregate.values()) lines.push(cols.map(c => `"${String(r[c] ?? '').replace(/"/g,'""')}"`).join(';'));
@@ -371,7 +395,7 @@ function baixarCSV(){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'credito_rural_municipios_2015_2025_agregado.csv';
+  a.download = `credito_rural_municipios_${start}_${end}_agregado.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
