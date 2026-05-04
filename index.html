@@ -1,35 +1,356 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <title>Teste BCB</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mapa · Contratos de Crédito Rural por Município</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIINfQZnZyoE2wBSc7K0hWZlWPMKpRkaVYc=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <style>
+    :root{
+      --bg:#f5f2ec; --card:#fffdf8; --line:#d6d0c4; --text:#2a2520; --mut:#70685e;
+      --green:#2d5a3d; --green2:#4a7c5f; --sage:#a8c9b4; --rust:#b34a2a; --amber:#c4820a;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:var(--sans)}
+    .app{display:grid;grid-template-columns:360px 1fr;height:100vh;min-height:680px}
+    aside{background:#edeae1;border-right:1px solid var(--line);padding:16px;overflow:auto}
+    main{display:flex;flex-direction:column;min-width:0}
+    h1{font-size:20px;line-height:1.15;margin:0 0 6px;color:var(--green)}
+    .sub{font-size:12px;color:var(--mut);line-height:1.45;margin-bottom:14px}
+    .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0;box-shadow:0 1px 0 rgba(0,0,0,.03)}
+    label{display:block;font-size:11px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--mut);margin:10px 0 4px}
+    select,input,button{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 10px;background:white;color:var(--text);font-size:13px}
+    button{background:var(--green);color:#fff;border-color:var(--green);font-weight:700;cursor:pointer;margin-top:8px}
+    button:hover{filter:brightness(.96)}
+    button.secondary{background:#fff;color:var(--green);border-color:var(--green2)}
+    button.danger{background:var(--rust);border-color:var(--rust)}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .metric{display:grid;grid-template-columns:1fr auto;gap:6px;padding:8px 0;border-bottom:1px dashed var(--line);font-size:12px}
+    .metric:last-child{border-bottom:0}
+    .metric b{font-family:var(--mono);font-size:12px}
+    .progress{height:10px;background:#ddd7ca;border-radius:20px;overflow:hidden;margin:8px 0 5px}
+    .bar{height:100%;width:0;background:var(--green2);transition:width .25s}
+    #map{flex:1;min-height:420px;background:#ddd}
+    .topbar{height:50px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:var(--card);border-bottom:1px solid var(--line);gap:10px}
+    .topbar .title{font-family:var(--mono);font-size:12px;color:var(--mut)}
+    .topbar .hint{font-size:12px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    #log{height:150px;overflow:auto;white-space:pre-wrap;background:#1f231f;color:#eef5ec;border-radius:10px;padding:10px;font-family:var(--mono);font-size:11px;line-height:1.45}
+    .legend{background:white;padding:10px;border:1px solid #ddd;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.12);font-size:12px;line-height:1.6}
+    .legend .sw{display:inline-block;width:14px;height:10px;margin-right:6px;border:1px solid rgba(0,0,0,.15)}
+    .leaflet-tooltip{font-family:var(--sans);font-size:12px;line-height:1.35}
+    .pill{display:inline-block;background:#e6efe7;color:var(--green);border:1px solid #c8dccb;border-radius:20px;padding:2px 8px;font-family:var(--mono);font-size:10px;margin-top:4px}
+    .warn{font-size:12px;line-height:1.45;color:#6b4b0d;background:#fff5d6;border:1px solid #e8d48a;border-radius:8px;padding:8px;margin-top:8px}
+    a{color:var(--green)}
+    @media(max-width:900px){.app{grid-template-columns:1fr;grid-template-rows:auto 1fr}aside{height:48vh;border-right:0;border-bottom:1px solid var(--line)}main{height:52vh}.topbar{height:auto;align-items:flex-start;flex-direction:column;padding:10px 12px}}
+  </style>
 </head>
 <body>
+<div class="app">
+  <aside>
+    <h1>🌿 Mapa de Crédito Rural</h1>
+    <div class="sub">Contratos por município usando o endpoint SICOR/MDCR v2 <span class="pill">2015–2025</span>. O app baixa página por página, agrega por <code>codMunicIbge</code> e desenha a malha municipal do IBGE.</div>
 
-<h2>Teste BCB — Endpoint bruto</h2>
+    <div class="box">
+      <label>Período</label>
+      <div class="row">
+        <select id="anoIni"></select>
+        <select id="anoFim"></select>
+      </div>
 
-<button onclick="testar()">Testar endpoint</button>
+      <label>Métrica do mapa</label>
+      <select id="metric">
+        <option value="valorTotal">Valor total contratado</option>
+        <option value="qtdTotal">Quantidade de contratos</option>
+        <option value="vlCusteio">Valor de custeio</option>
+        <option value="vlInvestimento">Valor de investimento</option>
+        <option value="vlComercializacao">Valor de comercialização</option>
+        <option value="vlIndustrializacao">Valor de industrialização</option>
+      </select>
 
-<pre id="out"></pre>
+      <label>Tamanho da página BCB</label>
+      <select id="pageSize">
+        <option value="50">50 — mais estável</option>
+        <option value="100" selected>100 — recomendado</option>
+        <option value="250">250 — médio</option>
+        <option value="500">500 — rápido, pode falhar</option>
+      </select>
+
+      <button id="btnLoad" onclick="startLoad()">Carregar dados e mapa</button>
+      <button class="secondary" onclick="repaintMap()">Atualizar métrica no mapa</button>
+      <button class="secondary" onclick="downloadCSV()">Baixar agregado CSV</button>
+      <button class="danger" onclick="stopLoad()">Parar carregamento</button>
+
+      <div class="warn">Para “não perder dados”, o app só considera finalizado quando uma página vem menor que o tamanho selecionado. Se o BCB retornar erro no meio, ele para e avisa.</div>
+    </div>
+
+    <div class="box">
+      <strong>Status</strong>
+      <div class="progress"><div id="bar" class="bar"></div></div>
+      <div id="status" class="sub">Pronto.</div>
+      <div class="metric"><span>Municípios agregados</span><b id="mMun">0</b></div>
+      <div class="metric"><span>Linhas BCB lidas</span><b id="mRows">0</b></div>
+      <div class="metric"><span>Valor total</span><b id="mVal">R$ 0</b></div>
+      <div class="metric"><span>Contratos</span><b id="mQtd">0</b></div>
+    </div>
+
+    <div class="box">
+      <strong>Log</strong>
+      <pre id="log"></pre>
+    </div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <div class="title">/api/bcb → CusteioInvestimentoComercialIndustrialSemFiltros</div>
+      <div class="hint" id="hint">Aguardando carregamento…</div>
+    </div>
+    <div id="map"></div>
+  </main>
+</div>
 
 <script>
-async function testar() {
-  const url = "/api/bcb?endpoint=CusteioInvestimentoComercialIndustrialSemFiltros&$top=5";
+const ENDPOINT = "CusteioInvestimentoComercialIndustrialSemFiltros";
+const YEARS = Array.from({length: 11}, (_,i) => String(2015+i));
+const UF_IDS = [11,12,13,14,15,16,17,21,22,23,24,25,26,27,28,29,31,32,33,35,41,42,43,50,51,52,53];
+const agg = new Map();
+let rawRowsRead = 0;
+let stopped = false;
+let map, geoLayer, legend;
+let geoLoaded = false;
+let currentGeoJson = null;
 
-  document.getElementById("out").textContent = "Carregando...";
+const fmtInt = n => Math.round(Number(n||0)).toLocaleString('pt-BR');
+const fmtMoney = n => Number(n||0).toLocaleString('pt-BR', {style:'currency', currency:'BRL', maximumFractionDigits:0});
+const n = v => Number(v || 0);
 
-  try {
-    const res = await fetch(url);
+function init(){
+  const ini = document.getElementById('anoIni');
+  const fim = document.getElementById('anoFim');
+  YEARS.forEach(y => { ini.add(new Option(y,y)); fim.add(new Option(y,y)); });
+  ini.value = '2015'; fim.value = '2025';
+
+  map = L.map('map', {preferCanvas:true}).setView([-14.2,-51.9], 4);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '&copy; OpenStreetMap contributors | Malhas: IBGE | Dados: BCB/SICOR'
+  }).addTo(map);
+  addLegend();
+  setStatus('Pronto. Clique em “Carregar dados e mapa”.');
+}
+
+function yearsSelected(){
+  const a = Number(document.getElementById('anoIni').value);
+  const b = Number(document.getElementById('anoFim').value);
+  return YEARS.filter(y => Number(y) >= Math.min(a,b) && Number(y) <= Math.max(a,b));
+}
+
+function log(msg){
+  const el = document.getElementById('log');
+  el.textContent += msg + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+function setStatus(msg){ document.getElementById('status').textContent = msg; document.getElementById('hint').textContent = msg; }
+function setProgress(done,total){ document.getElementById('bar').style.width = total ? Math.min(100, done/total*100)+'%' : '0%'; }
+
+function buildUrl(params){
+  return '/api/bcb?' + new URLSearchParams({endpoint: ENDPOINT, '$format':'json', ...params}).toString();
+}
+
+async function fetchTextWithTimeout(url, timeoutMs=18000){
+  const ctl = new AbortController();
+  const timeout = setTimeout(() => ctl.abort(), timeoutMs);
+  try{
+    const res = await fetch(url, {signal: ctl.signal});
     const text = await res.text();
+    if(!res.ok) throw new Error(`HTTP ${res.status}\n${text.slice(0,800)}\nURL: ${url}`);
+    return text;
+  } finally { clearTimeout(timeout); }
+}
 
-    document.getElementById("out").textContent =
-      "HTTP " + res.status + "\n\n" + text;
+async function fetchPage(year, skip, top){
+  const select = 'codMunicIbge,Municipio,nomeUF,AnoEmissao,MesEmissao,QtdCusteio,VlCusteio,QtdInvestimento,VlInvestimento,QtdComercializacao,VlComercializacao,QtdIndustrializacao,VlIndustrializacao';
+  const params = {'$top': String(top), '$skip': String(skip), '$select': select, '$filter': `AnoEmissao eq '${year}'`};
+  const url = buildUrl(params);
+  let lastErr;
+  for(let attempt=1; attempt<=3; attempt++){
+    try{
+      const text = await fetchTextWithTimeout(url);
+      return JSON.parse(text).value || [];
+    }catch(e){
+      lastErr = e;
+      log(`Tentativa ${attempt}/3 falhou · ano ${year} skip ${skip}: ${String(e.message || e).slice(0,160)}`);
+      await new Promise(r => setTimeout(r, 700 * attempt));
+    }
+  }
+  throw lastErr;
+}
 
-  } catch (e) {
-    document.getElementById("out").textContent = e;
+function addRow(r){
+  const id = String(r.codMunicIbge || '').trim();
+  if(!id) return;
+  const cur = agg.get(id) || {
+    codMunicIbge:id, municipio:r.Municipio || '', uf:r.nomeUF || '',
+    qtdTotal:0, valorTotal:0, qtdCusteio:0, vlCusteio:0, qtdInvestimento:0, vlInvestimento:0,
+    qtdComercializacao:0, vlComercializacao:0, qtdIndustrializacao:0, vlIndustrializacao:0
+  };
+  cur.qtdCusteio += n(r.QtdCusteio); cur.vlCusteio += n(r.VlCusteio);
+  cur.qtdInvestimento += n(r.QtdInvestimento); cur.vlInvestimento += n(r.VlInvestimento);
+  cur.qtdComercializacao += n(r.QtdComercializacao); cur.vlComercializacao += n(r.VlComercializacao);
+  cur.qtdIndustrializacao += n(r.QtdIndustrializacao); cur.vlIndustrializacao += n(r.VlIndustrializacao);
+  cur.qtdTotal = cur.qtdCusteio + cur.qtdInvestimento + cur.qtdComercializacao + cur.qtdIndustrializacao;
+  cur.valorTotal = cur.vlCusteio + cur.vlInvestimento + cur.vlComercializacao + cur.vlIndustrializacao;
+  agg.set(id, cur);
+}
+
+function updateMetrics(){
+  let val=0, qtd=0;
+  for(const r of agg.values()){ val += r.valorTotal; qtd += r.qtdTotal; }
+  document.getElementById('mMun').textContent = fmtInt(agg.size);
+  document.getElementById('mRows').textContent = fmtInt(rawRowsRead);
+  document.getElementById('mVal').textContent = fmtMoney(val);
+  document.getElementById('mQtd').textContent = fmtInt(qtd);
+}
+
+async function startLoad(){
+  stopped = false;
+  agg.clear(); rawRowsRead = 0;
+  document.getElementById('log').textContent = '';
+  updateMetrics(); setProgress(0,1);
+  document.getElementById('btnLoad').disabled = true;
+
+  const years = yearsSelected();
+  const top = Number(document.getElementById('pageSize').value);
+  log(`Início · anos ${years[0]}–${years[years.length-1]} · página ${top}`);
+
+  try{
+    let yDone = 0;
+    for(const year of years){
+      let skip = 0, page = 1;
+      log(`\nAno ${year}`);
+      while(true){
+        if(stopped){ setStatus('Parado pelo usuário. Dados parciais preservados.'); return; }
+        setStatus(`BCB: ano ${year}, página ${page}, skip ${skip}. Linhas lidas: ${fmtInt(rawRowsRead)}`);
+        const rows = await fetchPage(year, skip, top);
+        rows.forEach(addRow);
+        rawRowsRead += rows.length;
+        updateMetrics();
+        log(`Ano ${year} página ${page}: ${rows.length} linhas · total ${rawRowsRead}`);
+        if(rows.length < top) break;
+        skip += top; page++;
+        await new Promise(r => setTimeout(r, 120));
+      }
+      yDone++;
+      setProgress(yDone, years.length);
+    }
+    setStatus(`Dados BCB completos para ${years[0]}–${years[years.length-1]}. Carregando/desenhando malha IBGE…`);
+    await loadGeoIfNeeded();
+    repaintMap();
+    setStatus(`Finalizado. ${fmtInt(agg.size)} municípios agregados de ${years[0]}–${years[years.length-1]}.`);
+  }catch(e){
+    log('\nERRO FATAL: ' + (e.stack || e.message || e));
+    setStatus('Erro no carregamento. Veja o log; dados parciais foram preservados, mas não é carga completa.');
+  }finally{
+    document.getElementById('btnLoad').disabled = false;
   }
 }
-</script>
+function stopLoad(){ stopped = true; }
 
+async function loadGeoIfNeeded(){
+  if(geoLoaded) return;
+  const features = [];
+  for(let i=0; i<UF_IDS.length; i++){
+    const uf = UF_IDS[i];
+    if(stopped) return;
+    setStatus(`IBGE: carregando malha municipal UF ${uf} (${i+1}/${UF_IDS.length})`);
+    // intrarregiao=municipio: divide a malha do estado em municípios; qualidade=minima mantém o arquivo mais leve.
+    const url = `https://servicodados.ibge.gov.br/api/v3/malhas/estados/${uf}?formato=application/vnd.geo+json&qualidade=minima&intrarregiao=municipio`;
+    const txt = await fetchTextWithTimeout(url, 30000);
+    const gj = JSON.parse(txt);
+    (gj.features || []).forEach(f => features.push(f));
+    await new Promise(r => setTimeout(r, 80));
+  }
+  currentGeoJson = {type:'FeatureCollection', features};
+  geoLoaded = true;
+}
+
+function featureId(feature){
+  const p = feature.properties || {};
+  return String(p.codarea || p.CD_MUN || p.CD_GEOCMU || p.id || p.codigo || p.geocodigo || '').trim();
+}
+function metricValue(d){ return d ? Number(d[document.getElementById('metric').value] || 0) : 0; }
+function colorScale(v, breaks){
+  if(!v) return '#ece7dc';
+  if(v <= breaks[0]) return '#dcebdc';
+  if(v <= breaks[1]) return '#b9d7bd';
+  if(v <= breaks[2]) return '#7fb28d';
+  if(v <= breaks[3]) return '#4a7c5f';
+  return '#1f4a31';
+}
+function quantileBreaks(vals){
+  const a = vals.filter(v => v>0).sort((x,y)=>x-y);
+  if(!a.length) return [0,0,0,0];
+  return [.2,.4,.6,.8].map(q => a[Math.min(a.length-1, Math.floor(q*(a.length-1)))]);
+}
+
+function repaintMap(){
+  if(!geoLoaded || !currentGeoJson){ setStatus('Carregue os dados e a malha primeiro.'); return; }
+  const vals = Array.from(agg.values()).map(metricValue);
+  const breaks = quantileBreaks(vals);
+  if(geoLayer) geoLayer.remove();
+  geoLayer = L.geoJSON(currentGeoJson, {
+    style: f => {
+      const d = agg.get(featureId(f));
+      const v = metricValue(d);
+      return {color:'#ffffff', weight:.35, fillColor:colorScale(v, breaks), fillOpacity:.82};
+    },
+    onEachFeature: (f, layer) => {
+      const id = featureId(f);
+      const d = agg.get(id);
+      const p = f.properties || {};
+      const nome = d?.municipio || p.nome || p.NM_MUN || p.name || id;
+      const html = d ? `<b>${nome}</b><br>IBGE: ${id}<br>UF: ${d.uf}<br>Valor total: ${fmtMoney(d.valorTotal)}<br>Contratos: ${fmtInt(d.qtdTotal)}<br>Custeio: ${fmtMoney(d.vlCusteio)}<br>Investimento: ${fmtMoney(d.vlInvestimento)}` : `<b>${nome}</b><br>IBGE: ${id}<br>Sem dados no período`;
+      layer.bindTooltip(html, {sticky:true});
+    }
+  }).addTo(map);
+  try{ map.fitBounds(geoLayer.getBounds(), {padding:[10,10]}); }catch(e){}
+  updateLegend(breaks);
+}
+
+function addLegend(){
+  legend = L.control({position:'bottomright'});
+  legend.onAdd = function(){ const div = L.DomUtil.create('div','legend'); div.id='legend'; div.innerHTML='Aguardando dados'; return div; };
+  legend.addTo(map);
+}
+function updateLegend(b){
+  const metric = document.getElementById('metric').selectedOptions[0].textContent;
+  const money = document.getElementById('metric').value.toLowerCase().includes('vl') || document.getElementById('metric').value.includes('valor');
+  const f = v => money ? fmtMoney(v) : fmtInt(v);
+  document.getElementById('legend').innerHTML = `<b>${metric}</b><br>
+    <span class="sw" style="background:#ece7dc"></span>0 / sem dados<br>
+    <span class="sw" style="background:#dcebdc"></span>até ${f(b[0])}<br>
+    <span class="sw" style="background:#b9d7bd"></span>até ${f(b[1])}<br>
+    <span class="sw" style="background:#7fb28d"></span>até ${f(b[2])}<br>
+    <span class="sw" style="background:#4a7c5f"></span>até ${f(b[3])}<br>
+    <span class="sw" style="background:#1f4a31"></span>acima de ${f(b[3])}`;
+}
+
+function downloadCSV(){
+  if(!agg.size){ alert('Carregue os dados primeiro.'); return; }
+  const cols = ['codMunicIbge','municipio','uf','qtdTotal','valorTotal','qtdCusteio','vlCusteio','qtdInvestimento','vlInvestimento','qtdComercializacao','vlComercializacao','qtdIndustrializacao','vlIndustrializacao'];
+  const lines = [cols.join(';')];
+  for(const r of agg.values()) lines.push(cols.map(c => '"' + String(r[c] ?? '').replace(/"/g,'""') + '"').join(';'));
+  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `credito_rural_municipios_${document.getElementById('anoIni').value}_${document.getElementById('anoFim').value}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+init();
+</script>
 </body>
 </html>
