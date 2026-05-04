@@ -210,7 +210,7 @@ async function carregarDados(){
           "$top": String(PAGE_SIZE),
           "$skip": String(skip),
           "$select": select,
-          "$filter": `AnoEmissao eq '${year}'`
+          "$filter": `AnoEmissao eq ${year}`
         });
 
         totalRows += rows.length;
