@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Teste BCB</title>
+</head>
+<body>
+
+<h2>Teste BCB — Endpoint bruto</h2>
+
+<button onclick="testar()">Testar endpoint</button>
+
+<pre id="out"></pre>
+
+<script>
+async function testar() {
+  const url = "/api/bcb?endpoint=CusteioInvestimentoComercialIndustrialSemFiltros&$top=5";
+
+  document.getElementById("out").textContent = "Carregando...";
+
+  try {
+    const res = await fetch(url);
+    const text = await res.text();
+
+    document.getElementById("out").textContent =
+      "HTTP " + res.status + "\n\n" + text;
+
+  } catch (e) {
+    document.getElementById("out").textContent = e;
+  }
+}
+</script>
+
+</body>
+</html>
